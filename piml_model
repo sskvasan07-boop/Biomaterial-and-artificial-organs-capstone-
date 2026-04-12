@@ -1,0 +1,101 @@
+import numpy as np
+import pandas as pd
+import xgboost as xgb
+import shap
+
+class PhysicsInformedModel:
+    def __init__(self):
+        self.features = ['Size_nm', 'Zeta_mV', 'PDI', 'Coating_Ratio']
+        self.safety_model = xgb.XGBRegressor(n_estimators=100, max_depth=4, learning_rate=0.1, random_state=42)
+        self.uptake_model = xgb.XGBRegressor(n_estimators=100, max_depth=4, learning_rate=0.1, random_state=42)
+        
+        self._train_mock_data()
+        self.explainer = shap.TreeExplainer(self.safety_model)
+
+    def _train_mock_data(self):
+        """
+        Generates synthetic training data that embodies the physics-informed constraints (DLVO).
+        Then trains the XGBoost models. 
+        """
+        np.random.seed(42)
+        n_samples = 5000
+        
+        size = np.random.uniform(50, 500, n_samples)
+        zeta = np.random.uniform(-100, 50, n_samples)
+        pdi = np.random.uniform(0.05, 0.5, n_samples)
+        coating = np.random.uniform(0, 1, n_samples)
+        
+        df = pd.DataFrame({
+            'Size_nm': size,
+            'Zeta_mV': zeta,
+            'PDI': pdi,
+            'Coating_Ratio': coating
+        })
+        
+        safety = np.ones(n_samples) * 80.0
+        uptake = np.ones(n_samples) * 70.0
+        
+        # Physics Rule 1: Size 
+        # Ideal: 180-220 nm
+        size_penalty = np.abs(size - 200) / 100 * 15
+        size_penalty[np.logical_and(size >= 180, size <= 220)] = 0
+        safety -= size_penalty
+        uptake -= size_penalty * 1.5
+        
+        # Physics Rule 2: Zeta Potential & DLVO Stability
+        # Ideal: -40 to -30 mV
+        
+        # If zeta > 0 (Toxic positive charge)
+        toxic_mask = zeta > 0
+        safety[toxic_mask] -= (zeta[toxic_mask] * 1.5 + 40)
+        
+        # If low magnitude zeta (clumping risk from DLVO)
+        clump_mask = np.logical_and(zeta > -25, zeta <= 0)
+        safety[clump_mask] -= (25 + zeta[clump_mask]) * 2
+        uptake[clump_mask] -= 50 # Clumped particles can't be taken up efficiently
+        
+        # High negative charge (safe but too repellent for uptake)
+        repel_mask = zeta < -45
+        uptake[repel_mask] -= np.abs(zeta[repel_mask] + 45) * 0.8
+        
+        # Physics Rule 3: PDI
+        # High PDI means heterogeneous -> lower safety, lower uptake
+        pdi_penalty = (pdi - 0.1) * 60
+        pdi_penalty[pdi_penalty < 0] = 0
+        safety -= pdi_penalty
+        uptake -= pdi_penalty
+        
+        # Add some noise
+        safety += np.random.normal(0, 2, n_samples)
+        uptake += np.random.normal(0, 2, n_samples)
+        
+        # Clip to 0-100%
+        safety = np.clip(safety, 0, 100)
+        uptake = np.clip(uptake, 0, 100)
+        
+        self.safety_model.fit(df, safety)
+        self.uptake_model.fit(df, uptake)
+
+    def predict(self, size, zeta, pdi, coating):
+        X = pd.DataFrame({
+            'Size_nm': [size],
+            'Zeta_mV': [zeta],
+            'PDI': [pdi],
+            'Coating_Ratio': [coating]
+        })
+        
+        safety_score = float(self.safety_model.predict(X)[0])
+        uptake_score = float(self.uptake_model.predict(X)[0])
+        
+        # Get SHAP values for the safety prediction
+        shap_values = self.explainer.shap_values(X)[0]
+        base_value = self.explainer.expected_value
+        
+        # Format SHAP data for Plotly
+        shap_data = {
+            'features': self.features,
+            'values': shap_values,
+            'base_value': float(base_value)
+        }
+        
+        return np.clip(safety_score, 0, 100), np.clip(uptake_score, 0, 100), shap_data
