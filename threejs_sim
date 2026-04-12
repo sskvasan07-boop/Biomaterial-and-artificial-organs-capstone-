@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Nanocarrier Uptake Simulation</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #f0f2f6; }
+        canvas { display: block; }
+    </style>
+    <!-- Include Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+</head>
+<body>
+    <script>
+        // Inject from Python: 'optimal', 'clumping', or 'repel'
+        const simState = "___SIM_STATE___"; 
+
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        camera.position.set(0, 5, 15);
+        camera.lookAt(0, 0, 0);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(5, 10, 5);
+        scene.add(dirLight);
+
+        // Lipid Membrane (curved plane)
+        const membraneGeometry = new THREE.PlaneGeometry(20, 20, 32, 32);
+        
+        // Make it slightly wavy
+        const posAttribute = membraneGeometry.attributes.position;
+        for (let i = 0; i < posAttribute.count; i++) {
+            const x = posAttribute.getX(i);
+            const y = posAttribute.getY(i);
+            posAttribute.setZ(i, Math.sin(x*0.5)*0.5 + Math.cos(y*0.5)*0.5);
+        }
+        membraneGeometry.computeVertexNormals();
+
+        const membraneMaterial = new THREE.MeshPhongMaterial({ 
+            color: 0x4dabf7, 
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.8,
+            shininess: 50
+        });
+        const membrane = new THREE.Mesh(membraneGeometry, membraneMaterial);
+        membrane.rotation.x = -Math.PI / 2;
+        membrane.position.y = -2;
+        scene.add(membrane);
+
+        // Nanocarrier (Curcumin)
+        const carrierGeometry = new THREE.SphereGeometry(0.8, 32, 32);
+        const carrierMaterial = new THREE.MeshPhongMaterial({ color: 0xffa94d, shininess: 100 });
+        const carrier = new THREE.Mesh(carrierGeometry, carrierMaterial);
+        
+        carrier.position.set(0, 8, 0);
+        scene.add(carrier);
+
+        // Extra carriers for clumping
+        const extraCarriers = [];
+        if (simState === 'clumping') {
+            for(let i=0; i<3; i++) {
+                let ec = new THREE.Mesh(carrierGeometry, carrierMaterial);
+                ec.position.set((Math.random()-0.5)*5, 8 + Math.random()*2, (Math.random()-0.5)*5);
+                scene.add(ec);
+                extraCarriers.push(ec);
+            }
+        }
+
+        // Animation logic based on state
+        function startSimulation() {
+            if (simState === 'optimal') {
+                // Smooth endocytosis mapping
+                gsap.to(carrier.position, {
+                    y: -2.5, 
+                    duration: 3, 
+                    ease: "power1.inOut",
+                    onUpdate: function() {
+                        // Membrane dent
+                        if (carrier.position.y < 0) {
+                            membrane.position.y = carrier.position.y * 0.2 - 2;
+                        }
+                    },
+                    onComplete: function() {
+                        membrane.position.y = -2; // Snap back
+                        gsap.to(carrierMaterial, {opacity: 0, transparent: true, duration: 1});
+                    }
+                });
+            } else if (simState === 'clumping') {
+                // Clump together and get stuck
+                gsap.to(carrier.position, {y: 2, x: 0.5, duration: 2, ease: "power2.out"});
+                extraCarriers.forEach((ec, idx) => {
+                    gsap.to(ec.position, {
+                        y: 2 + (Math.random()-0.5)*0.5, 
+                        x: 0.5 + (Math.random()-0.5)*0.5,
+                        z: (Math.random()-0.5)*0.5,
+                        duration: 2, 
+                        ease: "power2.out"
+                    });
+                });
+                
+                // Slowly fall but not enter
+                setTimeout(() => {
+                    gsap.to(carrier.position, {y: -1.5, duration: 3});
+                    extraCarriers.forEach((ec) => {
+                        gsap.to(ec.position, {y: -1.5 + (Math.random()-0.5), duration: 3});
+                    });
+                }, 2500);
+
+            } else { // repel / toxic
+                // Hit membrane and bounce
+                gsap.to(carrier.position, {
+                    y: -1.8, 
+                    duration: 1.5, 
+                    ease: "power2.in",
+                    onComplete: function() {
+                        // Flash red for damage / repel
+                        gsap.to(membraneMaterial.color, {r: 1, g: 0, b: 0, duration: 0.2, yoyo: true, repeat: 1});
+                        gsap.to(carrier.position, {
+                            y: 5, 
+                            x: 3,
+                            duration: 1.5, 
+                            ease: "power2.out"
+                        });
+                    }
+                });
+            }
+        }
+
+        // Delay start slightly
+        setTimeout(startSimulation, 500);
+
+        function animate() {
+            requestAnimationFrame(animate);
+            // Rotate membrane slowy
+            membrane.rotation.z += 0.001;
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
