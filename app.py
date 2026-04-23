@@ -2,10 +2,14 @@ import streamlit as st
 import numpy as np
 import plotly.graph_objects as go
 import streamlit.components.v1 as components
+from pathlib import Path
 
 import time
 from piml_model import PhysicsInformedModel
 from bohrium_connector import BohriumMDConnector
+
+# Resolve paths relative to this script's directory (robust for any working dir)
+HERE = Path(__file__).parent
 
 # --- Page Config ---
 st.set_page_config(
@@ -41,7 +45,7 @@ st.markdown("""
 
 # --- App Header ---
 st.title("🧬 Physics-Informed Nanocarrier Uptake Simulator")
-st.markdown("Predicts curcumin nanocarrier cellular interactions using XGBoost embedded with DLVO colloidal constraints.")
+st.markdown("Predicts nanocarrier cellular interactions using XGBoost embedded with DLVO colloidal constraints.")
 
 # --- Initialization ---
 @st.cache_resource
@@ -122,7 +126,7 @@ with col_vis:
     st.subheader("🔬 3D Interaction Visualizer (Three.js)")
     
     try:
-        with open("threejs_sim.html", 'r') as f:
+        with open(HERE / "threejs_sim.html", 'r') as f:
             html_content = f.read()
             html_content = html_content.replace("___SIM_STATE___", sim_state)
             # Injecting a timestamp makes the HTML string unique per rerun,
@@ -172,62 +176,3 @@ with st.expander("View Molecular Dynamics Interaction Report", expanded=(sim_btn
     with st.spinner("Querying Molecular Dynamics data..."):
         report = BohriumMDConnector.get_md_analysis(selected_coating, selected_zeta)
         st.markdown(report)
-
-import time
-
-class BohriumMDConnector:
-    """
-    Mock connector simulating API calls to Bohrium AI for Molecular Dynamics
-    (MD) data regarding Chitosan/Alginate coating interactions with lipid bilayers.
-    """
-    
-    @staticmethod
-    def get_md_analysis(chitosan_ratio, zeta_potential):
-        """
-        Returns mock molecular dynamics findings based on the coating formulation and zeta potential.
-        """
-        # Removed artificial latency to prevent UI freezing on every reading slider interaction
-        pass
-
-        
-        # Determine the primary coating agent
-        if chitosan_ratio > 0.6:
-            coating = "Chitosan-dominant"
-            charge_status = "highly protonated" if zeta_potential > 0 else "de-protonated (anomalous)"
-        elif chitosan_ratio < 0.4:
-            coating = "Alginate-dominant"
-            charge_status = "carboxylate-rich"
-        else:
-            coating = "Balanced Chitosan-Alginate complex"
-            charge_status = "polyelectrolyte complexed"
-            
-        # Generate scientific grounding text
-        analysis = f"""
-**Bohrium AI Molecular Dynamics Report**
-
-Simulation Parameters:
-- Formulation: {coating} 
-- Charge Profile: {charge_status} ({zeta_potential} mV)
-
-**Interaction with Lipid Bilayer (POPC/POPG model):**
-"""
-        
-        if zeta_potential < -30:
-            analysis += """
-- The strong negative surface charge (-30 to -40 mV) creates ideal electrostatic repulsion between individual nanocarriers (DLVO theory).
-- High structural stability in phosphate-buffered saline (PBS) environments.
-- Steric hindrance from the polymer chains facilitates smooth energy-barrier crossing during endocytosis without membrane rupture.
-"""
-        elif zeta_potential > 10:
-            analysis += """
-- The positive charge promotes very strong electrostatic attraction to the negatively charged cell membrane.
-- *Warning:* High risk of acute membrane depolarization and cytotoxicity. MD simulations show rapid pore formation and localized membrane damage.
-"""
-        else: # -30 to 10
-            analysis += """
-- Low magnitude charge limits colloidal stability.
-- Van der Waals forces dominate over electrostatic repulsion.
-- MD trajectories show high probability of nanocarrier aggregation (clumping) before reaching the lipid bilayer, significantly severely impeding cellular uptake.
-"""
-        
-        return analysis
